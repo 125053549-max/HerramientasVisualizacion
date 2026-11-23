@@ -1,5 +1,5 @@
 # Tablero del SIE de Banxico, con token
-# Herramientas de Visualización · IDIA22X · Paarcial III
+# Herramientas de Visualización · IDIA22X · Parcial III
 #
 #     pip install -r requirements.txt
 #     streamlit run dashboard_banxico.py
@@ -47,8 +47,6 @@ def leer_token():
 
 TOKEN = leer_token()
 
-# Se valida al leerlo: un token vacío produce el mismo error que una URL
-# mal escrita, y sin esta revisión el problema aparece mucho después.
 if TOKEN and len(TOKEN) < 32:
     st.error(f"El token tiene {len(TOKEN)} caracteres y deberían ser 64. "
              "Revisa que esté completo y sin comillas.")
@@ -68,8 +66,6 @@ if not TOKEN:
 
 
 # ─── La consulta ───────────────────────────────────────────────────────
-# El SIE acepta varias claves separadas por comas en la misma petición,
-# así que un solo viaje trae todas las series del tablero.
 @st.cache_data(ttl=3600, show_spinner=False)
 def consultar(claves, inicio, fin, token):
     url = f"{SIE}/{','.join(claves)}/datos/{inicio}/{fin}"
@@ -89,8 +85,6 @@ def consultar(claves, inicio, fin, token):
         raise PermissionError("Demasiadas peticiones. Espera un momento.")
     respuesta.raise_for_status()
 
-    # Un 200 no garantiza JSON: el SIE contesta con una página de error
-    # y sigue siendo un 200 válido.
     tipo = respuesta.headers.get("Content-Type") or ""
     if "json" not in tipo:
         raise ValueError(f"El servidor no devolvió JSON sino {tipo}. "
@@ -100,12 +94,11 @@ def consultar(claves, inicio, fin, token):
     faltantes = {}
 
     for serie in respuesta.json()["bmx"]["series"]:
-        if "datos" not in serie:          # la clave existe pero sin datos
+        if "datos" not in serie:
             continue
         t = pd.DataFrame(serie["datos"])
         t["Fecha"] = pd.to_datetime(t.pop("fecha"), format="%d/%m/%Y")
 
-        # El valor llega como texto; los días inhábiles traen "N/E"
         faltantes[serie["idSerie"]] = int((t["dato"] == "N/E").sum())
         t["Valor"] = pd.to_numeric(
             t.pop("dato").str.replace(",", "", regex=False), errors="coerce")
@@ -162,14 +155,12 @@ if limpio.empty:
     st.warning("No hay valores numéricos en ese rango.")
     st.stop()
 
-# La serie de referencia para los indicadores es la primera que se pidió
 principal = limpio[limpio["Clave"] == claves[0]].sort_values("Fecha").copy()
 titulo_principal = principal["Serie"].iloc[0]
 
 
 # ─── Encabezado e indicadores ──────────────────────────────────────────
 st.title("Tablero de series del SIE")
-# El título lo declara Banxico: confirma que la clave es la correcta.
 st.caption(f"{titulo_principal} · del {inicio} al {fin} · "
            f"consultado el {datetime.now():%d/%m/%Y %H:%M}")
 
@@ -205,8 +196,6 @@ with izquierda:
         ax.legend(frameon=False)
         st.pyplot(fig)
     else:
-        # Varias series van en escalas distintas: se normalizan a base 100
-        # para que lo comparable sea el crecimiento, no el nivel.
         st.subheader("Comparación en base 100")
         limpio = limpio.sort_values("Fecha")
         limpio["Base100"] = (limpio.groupby("Clave")["Valor"]
@@ -227,7 +216,6 @@ with izquierda:
 
 with derecha:
     st.subheader("Cambio de un mes a otro")
-    # Para un precio, el valor del mes es el de cierre, no el promedio.
     mensual = (principal.set_index("Fecha")["Valor"].resample("ME").last())
     cambio = (mensual.pct_change() * 100).dropna()
 
@@ -257,22 +245,19 @@ with abajo_izq:
     st.pyplot(fig)
 
 with abajo_der:
-    st.subheader("Promedio por mes y año")
-    calor = principal.pivot_table(index="Anio", columns="Mes",
-                                  values="Valor", aggfunc="mean")
-
+    st.subheader("Distribución de variaciones diarias")
     fig, ax = plt.subplots(figsize=(6, 3.4))
-    imagen = ax.imshow(calor, cmap="YlGnBu", aspect="auto")
-    fig.colorbar(imagen, ax=ax)
-    ax.set_xticks(range(len(calor.columns)))
-    ax.set_xticklabels(["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul",
-                        "Ago", "Sep", "Oct", "Nov", "Dic"][:len(calor.columns)])
-    ax.set_yticks(range(len(calor.index)))
-    ax.set_yticklabels(calor.index)
-    ax.grid(False)
+    sns.histplot(porAnio["Variacion"], bins=30, kde=True,
+                 color=AZUL, edgecolor="white", alpha=0.6, ax=ax)
+    ax.axvline(0, color=ROJO, linewidth=1.2, linestyle="--", label="Sin cambio (0%)")
+    ax.axvline(porAnio["Variacion"].mean(), color=CUALI[0],
+               linewidth=1.5, linestyle="-", label="Media diaria")
+    ax.set_xlabel("Variación diaria (%)")
+    ax.set_ylabel("Frecuencia (días)")
+    ax.legend(frameon=False)
     st.pyplot(fig)
-    st.caption("Escala secuencial: el valor tiene orden pero no un cero "
-               "con significado, así que no va divergente.")
+    st.caption("Muestra la concentración de los cambios diarios y si existen "
+               "sesgos hacia subidas o bajadas bruscas.")
 
 
 # ─── Datos ─────────────────────────────────────────────────────────────
